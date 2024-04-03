@@ -1,0 +1,172 @@
+---
+title: "PAN-GO Single Cell Dimensionality Reduction"
+author: "Kelly Street"
+format: html
+---
+
+
+```{r}
+require(rjson)
+flat <- fromJSON(file='~/Downloads/flat.json')
+
+# section
+# category (row)
+# module (box)
+# node (module components) (gene list)
+# gene(s)
+
+# extract the modules, nodes, and genes
+df <- lapply(flat, function(mc){
+    data.frame(
+        # can't rely on labels, because some are ""
+        module = mc$module_id,
+        node = mc$node_id,
+        gene = sapply(mc$leaf_genes, function(g){ g$gene_symbol })
+    )
+})
+df <- do.call(rbind, df)
+
+# read in single-cell data
+require(SingleCellExperiment)
+sce <- readRDS('data/sce.rds')
+rownames(sce) <- rowData(sce)$Symbol
+```
+
+## Setup
+
+```{r}
+# subset to relevant genes
+counts <- assay(sce,'counts')[rownames(sce) %in% df$gene, ]
+
+# logical matrix indicating if node is active in given cell
+node.active <- sapply(unique(df$node), function(nd){
+    colSums(counts[which(rownames(counts) %in% df$gene[which(df$node == nd)]), , drop=FALSE]) > 0
+})
+
+# module % activation per cell
+mod.scores <- sapply(unique(df$module), function(md){
+    rowMeans(node.active[, which(colnames(node.active) %in% df$node[which(df$module == md)]), drop = FALSE])
+})
+```
+
+## Raw Module Scores
+
+### PCA
+```{r}
+pca <- BiocSingular::runPCA(mod.scores, rank = 5)
+
+pairs(pca$x[,1:4],asp=1, col=colorby(factor(sce$seurat_clusters_no2s)), main = 'Cluster')
+pairs(pca$x[,1:4],asp=1, col=colorby(log1p(sce$total_counts)), main = 'Total Count')
+```
+
+### UMAP
+```{r}
+require(RSpectra)
+umap <- uwot::umap(mod.scores)
+
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Euclidean) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Euclidean) by Cluster')
+```
+
+```{r}
+umap <- uwot::umap(mod.scores, metric = "cosine")
+
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Cosine) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Cosine) by Cluster')
+```
+The smaller group consists primarily of tumor cells and some endothelial cells.
+
+
+## Module Scores Normalized by Number of Genes
+```{r}
+geneNorm <- mod.scores / sce$total_genes
+```
+
+### PCA
+```{r}
+pca <- BiocSingular::runPCA(geneNorm, rank = 5)
+
+pairs(pca$x[,1:4],asp=1, col=colorby(factor(sce$seurat_clusters_no2s)), main = 'Cluster')
+pairs(pca$x[,1:4],asp=1, col=colorby(log1p(sce$total_counts)), main = 'Total Count')
+```
+
+### UMAP
+```{r}
+umap <- uwot::umap(geneNorm)
+
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Euclidean) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Euclidean) by Cluster')
+```
+
+```{r}
+umap <- uwot::umap(geneNorm, metric = "cosine")
+
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Cosine) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Cosine) by Cluster')
+```
+
+## Module Scores Normalized by Total Counts
+```{r}
+countNorm <- mod.scores / sce$total_counts
+```
+
+### PCA
+```{r}
+pca <- BiocSingular::runPCA(countNorm, rank = 5)
+
+pairs(pca$x[,1:4],asp=1, col=colorby(factor(sce$seurat_clusters_no2s)), main = 'Cluster')
+pairs(pca$x[,1:4],asp=1, col=colorby(log1p(sce$total_counts)), main = 'Total Count')
+```
+
+### UMAP
+```{r}
+umap <- uwot::umap(countNorm)
+
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Euclidean) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Euclidean) by Cluster')
+```
+
+```{r}
+umap <- uwot::umap(countNorm, metric = "cosine")
+
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Cosine) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Cosine) by Cluster')
+```
+
+
+## Regress Out Total Counts on PCs
+```{r}
+pca <- BiocSingular::runPCA(mod.scores, rank = nrow(mod.scores))
+resids <- lm(pca$x ~ log(sce$total_counts))$residuals
+```
+
+### PCA
+```{r}
+pca <- BiocSingular::runPCA(resids, rank = 5)
+
+pairs(pca$x[,1:4],asp=1, col=colorby(factor(sce$seurat_clusters_no2s)), main = 'Cluster')
+pairs(pca$x[,1:4],asp=1, col=colorby(log1p(sce$total_counts)), main = 'Total Count')
+```
+
+### UMAP
+```{r}
+umap <- uwot::umap(resids)
+
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Euclidean) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Euclidean) by Cluster')
+```
+
+```{r}
+umap <- uwot::umap(resids, metric = "cosine")
+
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Cosine) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Cosine) by Cluster')
+```
