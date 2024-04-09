@@ -30,6 +30,7 @@ df <- do.call(rbind, df)
 require(SingleCellExperiment)
 sce <- readRDS('~/Projects/hcrn/data/sce.rds')
 rownames(sce) <- rowData(sce)$Symbol
+sce <- sce[,!sce$doublet]
 
 ###
 # use counts matrix to build module % activation vector for each cell
@@ -46,8 +47,9 @@ mod.scores <- sapply(unique(df$module), function(md){
     rowMeans(node.active[, which(colnames(node.active) %in% df$node[which(df$module == md)]), drop = FALSE])
 })
 
-geneNorm <- mod.scores / rowSums(mod.scores) # somehow much worse?
-logCountNorm <- mod.scores / log(sce$total_counts) # not bad
+# geneNorm <- mod.scores / rowSums(mod.scores) # somehow much worse?
+# geneNorm <- mod.scores / sce$total_genes
+# logCountNorm <- mod.scores / log(sce$total_counts) # not bad
 
 {
     pca <- BiocSingular::runPCA(mod.scores, rank = nrow(mod.scores))
@@ -64,6 +66,14 @@ logCountNorm <- mod.scores / log(sce$total_counts) # not bad
     
 } # regress out total count on PCs
 
+{
+    pca <- BiocSingular::runPCA(mod.scores, rank = nrow(mod.scores))
+    resids <- lm(pca$x ~ sce$total_genes)$residuals
+    umap <- uwot::umap(resids, metric = "cosine")
+    plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)))
+    plot(umap, asp=1, col = colorby(log1p(sce$total_genes)))
+} # regress out gene count on PCs
+# this one looks pretty good
 
 
 # PCA
@@ -87,7 +97,7 @@ umap1 <- uwot::umap(logCountNorm)
 plot(umap1, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)))
 plot(umap1, asp=1, col = colorby(log1p(sce$total_genes)))
 
-umap2 <- uwot::umap(logCountNorm, metric = "cosine")
+umap2 <- uwot::umap(geneNorm, metric = "cosine")
 plot(umap2, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)))
 plot(umap2, asp=1, col = colorby(log1p(sce$total_genes)))
 

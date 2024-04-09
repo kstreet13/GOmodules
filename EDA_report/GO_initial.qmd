@@ -2,12 +2,13 @@
 title: "PAN-GO Single Cell Dimensionality Reduction"
 author: "Kelly Street"
 format: html
+embed-resources: true
 ---
 
 
 ```{r}
 require(rjson)
-flat <- fromJSON(file='~/Downloads/flat.json')
+mods <- fromJSON(file='../modules/clean_bpmodules.json')
 
 # section
 # category (row)
@@ -16,19 +17,25 @@ flat <- fromJSON(file='~/Downloads/flat.json')
 # gene(s)
 
 # extract the modules, nodes, and genes
-df <- lapply(flat, function(mc){
-    data.frame(
-        # can't rely on labels, because some are ""
-        module = mc$module_id,
-        node = mc$node_id,
-        gene = sapply(mc$leaf_genes, function(g){ g$gene_symbol })
-    )
+df <- lapply(mods, function(mc){
+    if(length(mc$leaf_genes) > 0){
+        return(
+            data.frame(
+                # can't rely on labels, because some are ""
+                module = mc$module_id,
+                node = mc$node_id,
+                gene = sapply(mc$leaf_genes, function(g){ g$gene_symbol })
+            )
+        )
+    }else{
+        return(NULL)
+    }
 })
 df <- do.call(rbind, df)
 
 # read in single-cell data
 require(SingleCellExperiment)
-sce <- readRDS('data/sce.rds')
+sce <- readRDS('~/Projects/hcrn/data/sce.rds')
 rownames(sce) <- rowData(sce)$Symbol
 ```
 
@@ -51,15 +58,6 @@ mod.scores <- sapply(unique(df$module), function(md){
 
 ## Raw Module Scores
 
-### PCA
-```{r}
-pca <- BiocSingular::runPCA(mod.scores, rank = 5)
-
-pairs(pca$x[,1:4],asp=1, col=colorby(factor(sce$seurat_clusters_no2s)), main = 'Cluster')
-pairs(pca$x[,1:4],asp=1, col=colorby(log1p(sce$total_counts)), main = 'Total Count')
-```
-
-### UMAP
 ```{r}
 require(RSpectra)
 umap <- uwot::umap(mod.scores)
@@ -84,15 +82,6 @@ The smaller group consists primarily of tumor cells and some endothelial cells.
 geneNorm <- mod.scores / sce$total_genes
 ```
 
-### PCA
-```{r}
-pca <- BiocSingular::runPCA(geneNorm, rank = 5)
-
-pairs(pca$x[,1:4],asp=1, col=colorby(factor(sce$seurat_clusters_no2s)), main = 'Cluster')
-pairs(pca$x[,1:4],asp=1, col=colorby(log1p(sce$total_counts)), main = 'Total Count')
-```
-
-### UMAP
 ```{r}
 umap <- uwot::umap(geneNorm)
 
@@ -114,15 +103,6 @@ plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP 
 countNorm <- mod.scores / sce$total_counts
 ```
 
-### PCA
-```{r}
-pca <- BiocSingular::runPCA(countNorm, rank = 5)
-
-pairs(pca$x[,1:4],asp=1, col=colorby(factor(sce$seurat_clusters_no2s)), main = 'Cluster')
-pairs(pca$x[,1:4],asp=1, col=colorby(log1p(sce$total_counts)), main = 'Total Count')
-```
-
-### UMAP
 ```{r}
 umap <- uwot::umap(countNorm)
 
@@ -140,21 +120,35 @@ plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP 
 ```
 
 
-## Regress Out Total Counts on PCs
+## Regress Out (log) Total Counts on PCs
 ```{r}
 pca <- BiocSingular::runPCA(mod.scores, rank = nrow(mod.scores))
 resids <- lm(pca$x ~ log(sce$total_counts))$residuals
 ```
 
-### PCA
 ```{r}
-pca <- BiocSingular::runPCA(resids, rank = 5)
+umap <- uwot::umap(resids)
 
-pairs(pca$x[,1:4],asp=1, col=colorby(factor(sce$seurat_clusters_no2s)), main = 'Cluster')
-pairs(pca$x[,1:4],asp=1, col=colorby(log1p(sce$total_counts)), main = 'Total Count')
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Euclidean) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Euclidean) by Cluster')
 ```
 
-### UMAP
+```{r}
+umap <- uwot::umap(resids, metric = "cosine")
+
+layout(matrix(1:2, nrow=1))
+plot(umap, asp=1, col = colorby(log1p(sce$total_genes)), main = 'UMAP (Cosine) by Total Count')
+plot(umap, asp=1, col = colorby(factor(sce$seurat_clusters_no2s)), main = 'UMAP (Cosine) by Cluster')
+```
+
+
+## Regress Out Total Genes on PCs
+```{r}
+pca <- BiocSingular::runPCA(mod.scores, rank = nrow(mod.scores))
+resids <- lm(pca$x ~ sce$total_genes)$residuals
+```
+
 ```{r}
 umap <- uwot::umap(resids)
 
